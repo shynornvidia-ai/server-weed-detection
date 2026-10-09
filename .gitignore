@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+dist/
+build/
+
+# Du lieu chay thuc (mock data / outbox / sqlite / logs)
+edge/config/config.yaml
+edge/data/
+edge/logs/
+server/data/
+*.db
+
+# Model extracted tu zip
+edge/model/.best_model_extracted/
+
+# OS
+.DS_Store

@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weed Detector — Bản đồ cỏ</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, sans-serif; display: flex; height: 100vh; }
+  #sidebar { width: 340px; padding: 16px; background: #101418; color: #e6e6e6; overflow-y: auto; }
+  #map { flex: 1; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  .card { background: #1b222a; border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+  .card h3 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; color: #9ab; }
+  select, input, button { width: 100%; padding: 8px; margin-top: 6px; border-radius: 6px;
+                          border: 1px solid #345; background: #0d1117; color: #e6e6e6; }
+  button { cursor: pointer; background: #2563eb; border: none; font-weight: 600; }
+  button.secondary { background: #374151; }
+  button.danger { background: #b91c1c; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .row { display: flex; gap: 6px; }
+  .row > * { flex: 1; }
+  .stat { display: flex; justify-content: space-between; padding: 3px 0; font-size: 14px; }
+  .stat b { color: #7dd3fc; }
+  .legend { display: flex; gap: 8px; align-items: center; font-size: 12px; margin-top: 8px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  #points-list { max-height: 240px; overflow-y: auto; font-size: 12px; }
+  .pt { padding: 6px 8px; border-radius: 6px; cursor: pointer; margin-bottom: 4px; background: #232b34; }
+  .pt:hover { background: #2f3a46; }
+  .badge { display:inline-block; padding:1px 6px; border-radius:4px; font-size:11px; background:#365314; color:#bef264;}
+  .badge.blue { background:#1e3a5f; color:#7dd3fc; }
+  .badge.warn { background:#78350f; color:#fcd34d; }
+  table.daily { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.daily th, table.daily td { text-align: right; padding: 3px 4px; border-bottom: 1px solid #2a333d; }
+  table.daily th:first-child, table.daily td:first-child { text-align: left; }
+  table.daily th { color: #9ab; font-weight: 600; }
+  .att { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; width: 132px; margin-top: 6px; }
+  .att div { height: 30px; border-radius: 3px; font-size: 10px; color: #fff;
+             display: flex; align-items: center; justify-content: center;
+             text-shadow: 0 0 3px #000; }
+  #toast { position: fixed; bottom: 16px; right: 16px; background: #065f46; color: white;
+           padding: 10px 14px; border-radius: 8px; display: none; z-index: 9999; max-width: 340px; }
+  details summary { cursor: pointer; font-size: 12px; color: #9ab; }
+  .muted { color: #7a8a99; font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="sidebar">
+  <h1>🌾 Weed Detector</h1>
+
+  <div class="card">
+    <h3>Thiết bị &amp; phiên</h3>
+    <select id="device-sel"><option>Đang tải...</option></select>
+    <select id="session-sel"><option value="">Tất cả phiên</option></select>
+
+    <div class="row" style="margin-top:6px">
+      <div><label class="muted">Từ ngày</label><input id="from-date" type="date"></div>
+      <div><label class="muted">Đến ngày</label><input id="to-date" type="date"></div>
+    </div>
+
+    <button onclick="reload()">Tải dữ liệu</button>
+    <button class="secondary" id="auto-btn" onclick="toggleAuto()">Tự động 15s: TẮT</button>
+
+    <details style="margin-top:8px">
+      <summary>⚙ Khoá quản trị (xóa phiên)</summary>
+      <input id="admin-key" type="password" placeholder="X-API-Key để xóa dữ liệu"
+             oninput="localStorage.setItem('weed_admin_key', this.value)">
+      <span class="muted">Lưu trong trình duyệt. Trống = hỏi lại khi xóa.</span>
+    </details>
+
+    <button class="danger" style="margin-top:8px" onclick="deleteSession()">🗑 Xóa phiên đang chọn</button>
+    <button class="danger" onclick="deleteDeviceSessions()">🗑 Xóa TẤT CẢ phiên thiết bị này</button>
+  </div>
+
+  <div class="card">
+    <h3>Thống kê</h3>
+    <div id="stats"></div>
+  </div>
+
+  <div class="card">
+    <h3>Theo ngày</h3>
+    <div id="daily"><span class="muted">Chưa có dữ liệu</span></div>
+  </div>
+
+  <div class="card">
+    <h3>Heatmap</h3>
+    <label>Ô lưới (m): <input id="cell-size" type="number" value="5" min="1" max="100"
+           style="width:70px"></label>
+    <button onclick="reload()">Áp dụng</button>
+    <div class="legend">
+      <span class="dot" style="background:#fee2e2"></span>thấp
+      <span class="dot" style="background:#ef4444"></span>cao
+    </div>
+    <div class="legend"><span class="dot" style="background:#f59e0b"></span>vị trí ước lượng (GPS mất fix)</div>
+  </div>
+
+  <div class="card">
+    <h3>Điểm cỏ (click để chỉ đường)</h3>
+    <div id="points-list">Chưa có dữ liệu</div>
+    <button class="secondary" id="more-btn" style="display:none" onclick="loadMore()">Tải thêm</button>
+    <div id="points-meta" class="muted"></div>
+  </div>
+</div>
+<div id="map"></div>
+<div id="toast"></div>
+
+<script>
+const map = L.map('map').setView([12.6812, 108.0642], 16);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 20, attribution: '© OpenStreetMap'
+}).addTo(map);
+
+let heatLayer = null, trackLine = null, estTrackLine = null;
+let markersLayer = L.layerGroup().addTo(map);
+let grassPoints = [];
+const PAGE = 1000;          // so diem moi lan tai
+let offset = 0;             // vi tri phan trang hien tai
+let autoTimer = null;
+
+document.getElementById('admin-key').value = localStorage.getItem('weed_admin_key') || '';
+
+function toast(msg, ms = 2500) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.style.display = 'block';
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', ms);
+}
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) { toast('Lỗi API: ' + r.status); throw new Error(r.status); }
+  return r.json();
+}
+
+// --------- bo loc thoi gian ----------
+function timeRange() {
+  const f = document.getElementById('from-date').value;
+  const t = document.getElementById('to-date').value;
+  let q = '';
+  if (f) q += '&since=' + encodeURIComponent(f + 'T00:00:00');
+  if (t) q += '&until=' + encodeURIComponent(t + 'T23:59:59');
+  return q;
+}
+
+function selection() {
+  const dev = document.getElementById('device-sel').value;
+  const sess = document.getElementById('session-sel').value;
+  let q = dev ? 'device_id=' + encodeURIComponent(dev) : '';
+  if (sess) q += (q ? '&' : '') + 'session_id=' + encodeURIComponent(sess);
+  return q;
+}
+
+// --------- chon thiet bi / phien ----------
+async function loadDevices() {
+  const devs = await api('/api/v1/devices');
+  const sel = document.getElementById('device-sel');
+  sel.innerHTML = devs.length
+    ? devs.map(d => `<option value="${d.id}">${d.name || d.id} (${d.session_count} phiên)</option>`).join('')
+    : '<option value="">— chưa có thiết bị —</option>';
+  sel.onchange = loadSessions;
+  await loadSessions();
+}
+
+async function loadSessions() {
+  const dev = document.getElementById('device-sel').value;
+  const sel = document.getElementById('session-sel');
+  if (!dev) { sel.innerHTML = '<option value="">—</option>'; return; }
+  const sess = await api('/api/v1/sessions?device_id=' + encodeURIComponent(dev));
+  sel.innerHTML = '<option value="">Tất cả phiên</option>' +
+    sess.map(s => {
+      const when = (s.created_at || '').slice(0, 16).replace('T', ' ');
+      const extra = s.frame_count != null ? `, ${s.frame_count} frame` : '';
+      return `<option value="${s.id}">${s.id.slice(0, 8)} · ${when}${extra}</option>`;
+    }).join('');
+}
+
+function reload() { offset = 0; loadData().catch(e => console.error(e)); }
+
+async function loadData() {
+  const dev = document.getElementById('device-sel').value;
+  if (!dev) return;
+  const cell = document.getElementById('cell-size').value || 5;
+  const sel = selection(), tm = timeRange();
+
+  const [stats, track, heat, daily, pts] = await Promise.all([
+    api('/api/v1/stats?' + sel + tm),
+    api('/api/v1/track?' + sel + tm),
+    api(`/api/v1/heatmap?cell_size_m=${cell}&` + sel + tm),
+    api('/api/v1/daily?' + sel + tm),
+    api('/api/v1/grass-points?' + sel + tm + `&limit=${PAGE}&offset=${offset}`),
+  ]);
+
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><span>Thiết bị</span><b>${stats.devices}</b></div>
+    <div class="stat"><span>Phiên</span><b>${stats.sessions}</b></div>
+    <div class="stat"><span>Mẫu GPS</span><b>${stats.samples}</b></div>
+    <div class="stat"><span>Frame</span><b>${stats.frames}</b></div>
+    <div class="stat"><span>Frame có cỏ</span><b>${stats.grass_frames}</b></div>
+    <div class="stat"><span>Điểm track</span><b>${stats.track_points}</b></div>
+    <div class="stat"><span>Batch đã nhận</span><b>${stats.batches || '–'}</b></div>
+    <div class="stat"><span>⚠ Mẫu ước lượng</span><b>${stats.estimated_samples ?? 0}</b></div>`;
+
+  renderDaily(daily.rows);
+
+  // --- heatmap ---
+  if (heatLayer) map.removeLayer(heatLayer);
+  const heatData = heat.cells.map(c => [c.lat, c.lon, Math.min(1, c.max_prob)]);
+  if (heatData.length) {
+    heatLayer = L.heatLayer(heatData, {
+      radius: 25, blur: 18, maxZoom: 17, max: 1.0,
+      gradient: {0.2: '#fee2e2', 0.5: '#f97316', 0.8: '#ef4444', 1.0: '#7f1d1d'}
+    }).addTo(map);
+    map.fitBounds(L.latLngBounds(heatData).pad(0.25));
+  }
+
+  // --- track ---
+  if (trackLine) { map.removeLayer(trackLine); trackLine = null; }
+  if (estTrackLine) { map.removeLayer(estTrackLine); estTrackLine = null; }
+  const realPts = track.points.filter(p => !p.estimated);
+  const estPts = track.points.filter(p => p.estimated);
+  if (realPts.length > 1) {
+    trackLine = L.polyline(realPts.map(p => [p.lat, p.lon]),
+      {color: '#38bdf8', weight: 3, opacity: 0.8}).addTo(map);
+  }
+  if (estPts.length > 1) {
+    estTrackLine = L.polyline(estPts.map(p => [p.lat, p.lon]),
+      {color: '#f59e0b', weight: 3, opacity: 0.9, dashArray: '6 6'})
+      .bindTooltip('📍 Lộ trình ƯỚC LƯỢNG (GPS mất fix)').addTo(map);
+  }
+  if (track.points.length) {
+    const last = track.points.at(-1);
+    L.circleMarker([last.lat, last.lon],
+      {radius: 6, color: last.estimated ? '#f59e0b' : '#38bdf8', fillOpacity: 1})
+      .bindTooltip(last.estimated ? 'Vị trí ƯỚC LƯỢNG' : 'Vị trí hiện tại').addTo(map);
+  }
+
+  // --- grass points (phan trang) ---
+  grassPoints = pts.points;
+  offset += pts.count;
+  renderPoints(pts);
+  renderMarkers();
+}
+
+function renderDaily(rows) {
+  const el = document.getElementById('daily');
+  if (!rows || !rows.length) { el.innerHTML = '<span class="muted">Chưa có dữ liệu</span>'; return; }
+  el.innerHTML = `<table class="daily"><tr><th>Ngày</th><th>Mẫu</th><th>Frame</th>
+      <th>Cỏ</th><th>Ước lượng</th></tr>` +
+    rows.slice(0, 10).map(r => `<tr><td>${r.day.slice(5)}</td><td>${r.samples}</td>
+      <td>${r.frames}</td><td>${r.grass_frames}</td>
+      <td>${r.estimated ? '⚠ ' + r.estimated : 0}</td></tr>`).join('') +
+    '</table>' + (rows.length > 10
+      ? `<div class="muted">… ${rows.length - 10} ngày nữa</div>` : '');
+}
+
+// --------- attention 12 patch (grid 3x4, row-major) ----------
+function attentionHtml(arr) {
+  if (!Array.isArray(arr) || arr.length !== 12) return '';
+  const max = Math.max(...arr, 1e-6);
+  const cells = arr.map((v, i) => {
+    const a = 0.15 + 0.85 * (v / max);
+    const bg = `rgba(239,68,68,${a.toFixed(2)})`;
+    return `<div style="background:${bg}" title="patch ${i}: ${v.toFixed(3)}">${v.toFixed(2)}</div>`;
+  }).join('');
+  return `<div class="muted" style="margin-top:6px">Attention 12 patch (3×4)</div>
+          <div class="att">${cells}</div>`;
+}
+
+function renderMarkers() {
+  markersLayer.clearLayers();
+  grassPoints.forEach((p, i) => {
+    const color = p.estimated ? '#f59e0b' : '#ef4444';
+    const tag = p.estimated ? '<b>⚠ Vị trí ƯỚC LƯỢNG</b><br>' : '';
+    const m = L.circleMarker([p.lat, p.lon], {
+      radius: 5, color: color, fillColor: color, fillOpacity: 0.75
+  }).bindPopup(`${tag}<b>Cỏ (p=${p.prob.toFixed(2)})</b><br>cam: ${p.camera}` +
+      `<br>${p.captured_at}${attentionHtml(p.attention)}`);
+    m.on('click', () => showPoint(i, false));
+    markersLayer.addLayer(m);
+  });
+}
+
+function renderPoints(pts) {
+  const list = document.getElementById('points-list');
+  const meta = document.getElementById('points-meta');
+  list.innerHTML = grassPoints.length
+    ? grassPoints.map((p, i) => `
+      <div class="pt" onclick="showPoint(${i})">
+        <b>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</b><br>
+        p=${p.prob.toFixed(2)} <span class="badge blue">${p.camera}</span>
+        ${p.estimated ? '<span class="badge warn">ước lượng</span>' : ''}
+      </div>`).join('')
+    : 'Chưa có dữ liệu';
+  const more = document.getElementById('more-btn');
+  more.style.display = (pts.has_more && pts.total > 0) ? 'block' : 'none';
+  more.textContent = `Tải thêm (${grassPoints.length}/${pts.total})`;
+  meta.textContent = pts.total > 0
+    ? `Đang xem ${grassPoints.length} / ${pts.total} điểm cỏ` : '';
+}
+
+async function loadMore() { await loadData(); }
+
+function flyToPoint(i) {
+  const p = grassPoints[i];
+  map.flyTo([p.lat, p.lon], 19, {duration: 1.2});
+}
+
+function showPoint(i, ask = true) {
+  const p = grassPoints[i];
+  flyToPoint(i);
+  const dir = `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}&travelmode=walking`;
+  const estNote = p.estimated
+    ? '\n\n⚠ LƯU Ý: vị trí này là ƯỚC LƯỢNG (GPS mất fix), không phải toạ độ GPS thật.' : '';
+  if (!ask) return;
+  if (confirm(`Chỉ đường tới điểm cỏ (${p.lat.toFixed(5)}, ${p.lon.toFixed(5)})?\n` +
+              `prob=${p.prob.toFixed(2)}, cam=${p.camera}${estNote}`)) {
+    window.open(dir, '_blank');
+  }
+}
+
+// --------- tu dong lam moi ----------
+function toggleAuto() {
+  const btn = document.getElementById('auto-btn');
+  if (autoTimer) {
+    clearInterval(autoTimer); autoTimer = null;
+    btn.textContent = 'Tự động 15s: TẮT';
+  } else {
+    autoTimer = setInterval(reload, 15000);
+    btn.textContent = 'Tự động 15s: BẬT';
+  }
+}
+
+// --------- xoa phien (can X-API-Key quan tri) ----------
+async function adminDelete(path) {
+  let key = localStorage.getItem('weed_admin_key') || '';
+  if (!key) {
+    key = prompt('Nhập khoá quản trị (X-API-Key) để xóa:') || '';
+    if (!key) return false;
+    localStorage.setItem('weed_admin_key', key);
+    document.getElementById('admin-key').value = key;
+  }
+  const r = await fetch(path, {method: 'DELETE', headers: {'X-API-Key': key}});
+  if (r.status === 401) {
+    localStorage.removeItem('weed_admin_key');
+    toast('Sai khoá quản trị — nhập lại.');
+    return false;
+  }
+  if (!r.ok) { toast('Xóa thất bại: HTTP ' + r.status); return false; }
+  const res = await r.json();
+  toast(`Đã xóa: ${res.frames || 0} frame, ${res.samples || 0} mẫu, ` +
+        `${res.sessions || 1} phiên`);
+  return true;
+}
+
+async function deleteSession() {
+  const sid = document.getElementById('session-sel').value;
+  if (!sid) { toast('Hãy chọn một phiên cụ thể để xóa'); return; }
+  if (!confirm(`Xóa phiên ${sid.slice(0, 8)}…? Hành động không hoàn tác.`)) return;
+  if (await adminDelete('/api/v1/sessions/' + encodeURIComponent(sid))) reloadAll();
+}
+
+async function deleteDeviceSessions() {
+  const dev = document.getElementById('device-sel').value;
+  if (!dev) return;
+  if (!confirm(`Xóa TẤT CẢ phiên của thiết bị "${dev}"?\nHành động không hoàn tác.`)) return;
+  if (await adminDelete('/api/v1/devices/' + encodeURIComponent(dev) + '/sessions')) reloadAll();
+}
+
+async function reloadAll() {
+  offset = 0;
+  await loadDevices();
+  await loadData().catch(e => console.error(e));
+}
+
+document.getElementById('from-date').onchange = reload;
+document.getElementById('to-date').onchange = reload;
+document.getElementById('session-sel').onchange = reload;
+
+loadDevices().catch(console.error);
+</script>
+</body>
+</html>
