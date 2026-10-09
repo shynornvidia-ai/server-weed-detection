@@ -1,0 +1,28 @@
+# Render blueprint — Weed Detector Server (FastAPI + SQLite + web UI)
+# Deploy: dashboard.render.com -> New + -> Blueprint -> chon repo nay
+#
+# LUU Y (Render free tier):
+#   - Free web service SLEEP sau 15 phut idle, wake ~1 phut khi co request.
+#   - Filesystem EPHEMERAL: SQLite bi XOA moi lan sleep/restart/redeploy.
+#     -> du lieu chi giu trong phien, edge van an toan (outbox tren Jetson).
+#   - Muon giu du lieu qua sleep: nang len $7/thang + attach disk, hoac chuyen
+#     sang Neon Postgres free (sua db.py).
+
+services:
+  - type: web
+    name: weed-server
+    runtime: docker
+    plan: free
+    dockerfilePath: ./server/Dockerfile
+    dockerContext: ./server
+    healthCheckPath: /health
+    envVars:
+      # Render tu set PORT; CMD trong Dockerfile doc ${PORT}
+      - key: WEED_SERVER_DB
+        value: /tmp/weed_server.db
+      # API key cho edge (header X-API-Key). Render generate + luu trong
+      # dashboard -> copy vao edge/config/config.yaml (server.api_key).
+      - key: WEED_SERVER_API_KEY
+        generateValue: true
+      - key: WEED_SERVER_CORS_ORIGINS
+        value: "*"

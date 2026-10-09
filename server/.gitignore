@@ -1,0 +1,31 @@
+# Don't commit SQLite DB (ephemeral volume will recreate)
+data/
+*.db
+
+# Environment / secrets
+.env
+.env.local
+*.local
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+uv.lock
+
+# Logs
+logs/
+*.log
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Deploy / certs (không commit tls secrets)
+certs/
+*.pem
+*.key

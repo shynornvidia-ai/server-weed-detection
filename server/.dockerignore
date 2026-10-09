@@ -1,0 +1,7 @@
+# Khong gui .venv/data/logs/test len Docker build context
+.venv/
+data/
+.pytest_cache/
+tests/
+*.pyc
+__pycache__/
